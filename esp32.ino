@@ -9,6 +9,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include "md5.h"
+#include <WiFi.h>//more then 25% use of microcontroller
 
 #define BUF_LEN 1024
 #define MD5_DIGEST_LENGTH 	32
@@ -19,10 +20,9 @@ std::string realm;
 std::string nonce;
 std::string sessionId;
 time_t starttime;
-int seq = 1;
 
-std::string defaultServerIp = "192.168.1.4";
-int defaultServerPort = 1935;
+std::string defaultServerIp = "192.168.0.237";
+int defaultServerPort = 554;
 std::string defaultTestUri = "/video.mp4";
 std::string defaultUserAgent = "RTSP Client";
 std::string defaultUsername = "admin";
@@ -141,34 +141,46 @@ std::string bin2hex(const unsigned char* data, int length) {
     for (int i = 0; i < length; ++i) {
         ss << std::setw(2) << static_cast<unsigned>(data[i]);
     }
+
     return ss.str();
 }
 void sendAndReceive(const std::string& message, int& seq, int& sockfd) {
     send(sockfd, message.c_str(), message.length(), 0);
-
     char buffer[BUF_LEN];
-    recv(sockfd, buffer, BUF_LEN, 0);
-    std::cout << buffer << std::endl;
-
+    ssize_t bytesRead=recv(sockfd, buffer, BUF_LEN, 0);
+    buffer[bytesRead] = '\0';  // Null-terminate the received data
+    Serial.printf("%s",buffer);
     seq++;
 }
-
 void setup() {
+  const char *ssid = "Embedded";		   // Put your SSID here
+  const char *password = "embedded@123"; // Put your PASSWORD here
+  Serial.begin(115200);
+  // Connect the WiFi
+	WiFi.mode(WIFI_STA);
+	WiFi.begin(ssid, password);
+	while (WiFi.status() != WL_CONNECTED)
+	{
+		delay(500);
+		Serial.print(".");
+    
+	}
+
+	// Print information how to contact the camera server
+	IPAddress ip = WiFi.localIP();
+	Serial.print("\nWiFi connected with (ESP)IP:");
+	Serial.println(ip);
+  int seq = 1;
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        perror("Error opening socket");
-        return;
-    }
-    else {
-      Serial.println("ok\n");
-    }
     sockaddr_in serverAddress;
+    // Configure server address structure
+    memset(&serverAddress, 0, sizeof(serverAddress));
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(defaultServerPort);
     inet_pton(AF_INET, defaultServerIp.c_str(), &serverAddress.sin_addr);
 
     
-    if (connect(sockfd, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) == 0) {
+    if (connect(sockfd, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) == 0) {
             Serial.println("sync connect success");
 
         } else if (errno == EINPROGRESS){
@@ -181,12 +193,21 @@ void setup() {
     std::string url = "rtsp://" + defaultServerIp + defaultTestUri;
     char buffer[BUF_LEN];
     bool isDigest = false;
-std::string authSeq = "Basic " + std::string("YWRtaW46RW1iZWRkZWRA");
+    std::string authSeq = "Basic " + std::string("YWRtaW46RW1iZWRkZWRA");
 
-    sendAndReceive(genmsg_DESCRIBE(url, seq, defaultUserAgent, authSeq), seq, sockfd);
+    std::string mesg=genmsg_DESCRIBE(url, seq, defaultUserAgent, authSeq);
+    send(sockfd, mesg.c_str(), mesg.length(), 0);
+    char buffer1[BUF_LEN];
+    
+    ssize_t bytesRead1=recv(sockfd, buffer1, BUF_LEN, 0);
+    buffer1[bytesRead1] = '\0';
+    Serial.printf("%s",buffer1);
+    seq++;
+    mesg="";
 
     char* unauthorizedCheck = strstr(buffer, "Unauthorized");
-    if (unauthorizedCheck > 0) {
+
+    if (unauthorizedCheck) {
         isDigest = true;
 
         // New DESCRIBE with digest authentication
@@ -202,7 +223,14 @@ std::string authSeq = "Basic " + std::string("YWRtaW46RW1iZWRkZWRA");
 
         authSeq = generateAuthString(defaultUsername, defaultPassword, realm, "DESCRIBE", defaultTestUri, nonce);
 
-        sendAndReceive(genmsg_DESCRIBE(url, seq, defaultUserAgent, authSeq), seq, sockfd);
+        mesg=genmsg_DESCRIBE(url, seq, defaultUserAgent, authSeq);
+        send(sockfd, mesg.c_str(), mesg.length(), 0);
+        char buffer2[BUF_LEN];
+        ssize_t bytesRead2=recv(sockfd, buffer2, BUF_LEN, 0);
+        buffer2[bytesRead2] = '\0';
+        Serial.printf("%s",buffer2);
+        seq++;
+        mesg="";
     }
 
     control = decodeControl(buffer);
@@ -211,26 +239,38 @@ std::string authSeq = "Basic " + std::string("YWRtaW46RW1iZWRkZWRA");
         authSeq = generateAuthString(defaultUsername, defaultPassword, realm, "SETUP", defaultTestUri, nonce);
     }
 
-    sendAndReceive(genmsg_SETUP(control, seq, defaultUserAgent, authSeq), seq, sockfd);
 
+    
+
+    mesg=genmsg_SETUP(control, seq, defaultUserAgent, authSeq);
+    send(sockfd, mesg.c_str(), mesg.length(), 0);
     char sessionIdBuffer[BUF_LEN];
-    recv(sockfd, sessionIdBuffer, BUF_LEN, 0);
+    
+    ssize_t bytesRead3=recv(sockfd, sessionIdBuffer, BUF_LEN, 0);
+    sessionIdBuffer[bytesRead3] = '\0';
+    Serial.printf("%s",sessionIdBuffer);
     sessionId = decodeSession(sessionIdBuffer);
+    seq++;
+    mesg="";
 
-    sendAndReceive(genmsg_OPTIONS(url, seq, defaultUserAgent, sessionId, authSeq), seq, sockfd);
 
+    mesg=genmsg_OPTIONS(url, seq, defaultUserAgent, sessionId, authSeq);
+    send(sockfd, mesg.c_str(), mesg.length(), 0);
     char optionsBuffer[BUF_LEN];
-    recv(sockfd, optionsBuffer, BUF_LEN, 0);
-    std::cout << optionsBuffer << std::endl;
-
+    ssize_t bytesRead4=recv(sockfd, optionsBuffer, BUF_LEN, 0);
+    optionsBuffer[bytesRead4] = '\0';
+    Serial.printf("%s",optionsBuffer);
+    mesg="";
     seq++;
 
-    sendAndReceive(genmsg_PLAY(url + "/", seq, defaultUserAgent, sessionId, authSeq), seq, sockfd);
 
+    mesg=genmsg_PLAY(url + "/", seq, defaultUserAgent, sessionId, authSeq);
+    send(sockfd, mesg.c_str(), mesg.length(), 0);
     char playBuffer[BUF_LEN];
-    recv(sockfd, playBuffer, BUF_LEN, 0);
-    std::cout << playBuffer << std::endl;
-
+    ssize_t bytesRead5=recv(sockfd, playBuffer, BUF_LEN, 0);
+    playBuffer[bytesRead5] = '\0';
+    Serial.printf("%s",playBuffer);
+    mesg="";
     seq++;
 
     starttime = time(nullptr);
@@ -244,7 +284,8 @@ std::string authSeq = "Basic " + std::string("YWRtaW46RW1iZWRkZWRA");
         }
 
         char msgRcvBuffer[BUF_LEN];
-        recv(sockfd, msgRcvBuffer, BUF_LEN, 0);
+        //recv(sockfd, msgRcvBuffer, BUF_LEN, 0);
+        Serial.printf("%s",buffer);
     }
 
     seq++;
@@ -252,11 +293,7 @@ std::string authSeq = "Basic " + std::string("YWRtaW46RW1iZWRkZWRA");
     sendAndReceive(genmsg_TEARDOWN(url, seq, defaultUserAgent, sessionId, authSeq), seq, sockfd);
 
     char teardownBuffer[BUF_LEN];
-    recv(sockfd, teardownBuffer, BUF_LEN, 0);
-    std::cout << teardownBuffer << std::endl;
-
     close(sockfd);
-
 
 }
 
