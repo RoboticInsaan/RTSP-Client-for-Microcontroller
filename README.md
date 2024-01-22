@@ -1,3 +1,3 @@
 I am woring on getting raw data from ip camera.
-I sent play request to ip camera but not getting anything back
-I am looking for help
+I sent play request to ip camera and i got some data but not raw data like h264.
+If you want to use for basic request and authentication, then you can but it is not handling any RTP data... 
